@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sunucu Kopyala</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <canvas id="konfeti"></canvas>
+
+  <div class="titlebar">
+    <div class="titlebar-left">
+      <img src="../images/uygulama.png" class="titlebar-icon" alt="" onerror="this.style.display='none'" />
+      <span class="titlebar-title">Sunucu Kopyala</span>
+    </div>
+    <div class="titlebar-controls">
+      <button class="tb-btn btn-minimize" title="Küçült" onclick="minimize()">
+        <svg width="10" height="2" viewBox="0 0 10 2"><rect width="10" height="2" rx="1" fill="currentColor"/></svg>
+      </button>
+      <button class="tb-btn btn-close" title="Kapat" onclick="kapat()">
+        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <div class="header">
+      <h1>Sunucu Kopyalama</h1>
+      <p>Discord sunucusunu tüm ayarlarıyla başka bir sunucuya kopyala</p>
+    </div>
+
+    <div class="card">
+
+      <div class="field">
+        <label>Hesap Tokeni (Self)</label>
+        <div class="input-wrap">
+          <input type="password" id="tokenInput" placeholder="Token yapıştır..." />
+          <button class="toggle-pass" onclick="tokenGoster(this)">👁</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Kaynak Sunucu ID</label>
+        <div class="input-wrap">
+          <input type="text" id="sourceInput" placeholder="Kopyalanacak sunucunun ID'si" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Hedef Sunucu ID</label>
+        <div class="input-wrap">
+          <input type="text" id="targetInput" placeholder="Boş sunucu ID'si" />
+        </div>
+        <p class="hedef-notu">⚠️ Hedef sunucudaki tüm kanal ve roller silinir.</p>
+      </div>
+
+      <div class="field">
+        <label>İsim Değiştir (Opsiyonel)</label>
+        <div style="display:flex; gap:8px">
+          <div class="input-wrap" style="flex:1"><input type="text" id="fromInput" placeholder="Eski isim" /></div>
+          <div class="input-wrap" style="flex:1"><input type="text" id="toInput" placeholder="Yeni isim" /></div>
+        </div>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-kutu">
+          <span class="stat-label">Rol</span>
+          <span class="stat-deger" id="rolSayisi">0</span>
+        </div>
+        <div class="stat-kutu">
+          <span class="stat-label">Kategori</span>
+          <span class="stat-deger" id="kategoriSayisi">0</span>
+        </div>
+        <div class="stat-kutu">
+          <span class="stat-label">Kanal</span>
+          <span class="stat-deger" id="kanalSayisi">0</span>
+        </div>
+      </div>
+
+      <div class="field" style="margin-bottom:16px">
+        <label>İşlem</label>
+        <div class="islem-kutu" id="islemDurumu">--</div>
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-baslat" id="btnBaslat" onclick="baslat()">Kopyalamayı Başlat</button>
+        <button class="btn-durdur" id="btnDurdur" onclick="durdur()">Durdur</button>
+      </div>
+
+      <div class="log-kutu" id="logKutu"></div>
+
+    </div>
+
+    <div class="status-bar">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Hazır</span>
+    </div>
+
+    <div class="footer">
+      Made By <a class="footer-link" onclick="openLink()">swozinc</a>
+    </div>
+
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    let calisiyor = false;
+
+    function esc(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    async function yukle() {
+      const ayar = await ipcRenderer.invoke('ayarOku');
+      document.getElementById('tokenInput').value = ayar.token || '';
+      document.getElementById('sourceInput').value = ayar.sourceId || '';
+      document.getElementById('targetInput').value = ayar.targetId || '';
+      document.getElementById('fromInput').value = ayar.fromName || '';
+      document.getElementById('toInput').value = ayar.toName || '';
+    }
+
+    function tokenGoster(btn) {
+      const input = btn.previousElementSibling || btn.parentElement.querySelector('input');
+      input.type = input.type === 'password' ? 'text' : 'password';
+    }
+
+    function getDegerler() {
+      return {
+        token: document.getElementById('tokenInput').value.trim(),
+        sourceId: document.getElementById('sourceInput').value.trim(),
+        targetId: document.getElementById('targetInput').value.trim(),
+        fromName: document.getElementById('fromInput').value.trim(),
+        toName: document.getElementById('toInput').value.trim()
+      };
+    }
+
+    async function kaydet() {
+      const ayar = await ipcRenderer.invoke('ayarOku');
+      Object.assign(ayar, getDegerler());
+      await ipcRenderer.invoke('ayarYaz', ayar);
+    }
+
+    function setStatus(tip) {
+      const dot  = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      dot.className = 'status-dot';
+      const d = { hazir: ['','Hazır'], bekliyor: ['bekliyor','Bağlanıyor...'], aktif: ['aktif','Başarılı'], hata: ['hata','Hata oluştu'] }[tip] || ['','Hazır'];
+      if (d[0]) dot.classList.add(d[0]);
+      text.textContent = d[1];
+    }
+
+    function logEkle(mesaj, tip = 'bilgi') {
+      const kutu = document.getElementById('logKutu');
+      const satir = document.createElement('div');
+      satir.className = `log-satir ${tip}`;
+      satir.textContent = `[${new Date().toLocaleTimeString('tr-TR')}] ${mesaj}`;
+      kutu.appendChild(satir);
+      kutu.scrollTop = kutu.scrollHeight;
+    }
+
+    ipcRenderer.on('log', (_, { mesaj, tip }) => logEkle(mesaj, tip));
+
+    ipcRenderer.on('durum', (_, d) => {
+      if (d.rol !== undefined) document.getElementById('rolSayisi').textContent = d.rol;
+      if (d.kategori !== undefined) document.getElementById('kategoriSayisi').textContent = d.kategori;
+      if (d.kanal !== undefined) document.getElementById('kanalSayisi').textContent = d.kanal;
+
+      const top = d.total || 0;
+      const yuzde = top > 0 ? Math.floor(((d.done || 0) / top) * 100) : 0;
+      document.getElementById('progressFill').style.width = yuzde + '%';
+
+      let metin = '--';
+      switch (d.phase) {
+        case 'hazirlik':  metin = 'Sistem hazırlanıyor...'; break;
+        case 'temizlik':  metin = 'Hedef sunucu sıfırlanıyor...'; break;
+        case 'rol':       metin = `Roller aktarılıyor ${d.done}/${top} (%${yuzde})`; break;
+        case 'kategori':  metin = `Kategoriler inşa ediliyor ${d.done}/${top} (%${yuzde})`; break;
+        case 'kanal':     metin = `Kanallar inşa ediliyor ${d.done}/${top} (%${yuzde})`; break;
+        case 'bitti':     metin = 'Operasyon tamamlandı'; break;
+      }
+      document.getElementById('islemDurumu').textContent = metin;
+    });
+
+    async function baslat() {
+      if (calisiyor) return;
+
+      const degerler = getDegerler();
+
+      if (!degerler.token) { logEkle('Token gerekli!', 'hata'); setStatus('hata'); return; }
+      if (!degerler.sourceId) { logEkle('Kaynak sunucu ID gerekli!', 'hata'); setStatus('hata'); return; }
+      if (!degerler.targetId) { logEkle('Hedef sunucu ID gerekli!', 'hata'); setStatus('hata'); return; }
+
+      const btn = document.getElementById('btnBaslat');
+
+      calisiyor = true;
+      btn.disabled = true;
+      btn.textContent = 'Çalışıyor...';
+      setStatus('bekliyor');
+      document.getElementById('logKutu').innerHTML = '';
+      document.getElementById('rolSayisi').textContent = '0';
+      document.getElementById('kategoriSayisi').textContent = '0';
+      document.getElementById('kanalSayisi').textContent = '0';
+      document.getElementById('progressFill').style.width = '0%';
+      document.getElementById('islemDurumu').textContent = '--';
+      logEkle('Sunucu kopyalama başladı...', 'bilgi');
+
+      await kaydet();
+      const sonuc = await ipcRenderer.invoke('baslat', degerler);
+
+      calisiyor = false;
+      btn.disabled = false;
+      btn.textContent = 'Kopyalamayı Başlat';
+      setStatus('hazir');
+
+      if (sonuc.fatal === 'iptal') {
+        setStatus('hata');
+        logEkle('İşlem durduruldu.', 'uyari');
+      } else if (sonuc.basarili) {
+        setStatus('aktif');
+        logEkle(`Özet: ${sonuc.rol} rol, ${sonuc.kategori} kategori, ${sonuc.kanal} kanal kopyalandı.`, 'basari');
+        konfetiBas();
+      } else {
+        setStatus('hata');
+        logEkle(`İşlem başarısız: ${sonuc.fatal || 'Bilinmeyen hata'}`, 'hata');
+      }
+    }
+
+    function durdur() {
+      if (!calisiyor) return;
+      logEkle('Durdurma isteği iletildi...', 'uyari');
+      ipcRenderer.send('durdur');
+    }
+
+    function minimize() { ipcRenderer.send('minimize'); }
+    function kapat()    { ipcRenderer.send('kapat'); }
+    function openLink() { ipcRenderer.send('openLink', 'https://discord.gg/json'); }
+
+    function konfetiBas() {
+      const canvas = document.getElementById('konfeti');
+      const ctx = canvas.getContext('2d');
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+      canvas.style.display = 'block';
+
+      const renkler = ['#ff9500','#ffb74d','#ff6d00','#ffe082','#ffd54f','#fff'];
+      const parcalar = Array.from({ length: 120 }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * -canvas.height,
+        w: Math.random() * 8 + 4,
+        h: Math.random() * 14 + 6,
+        r: Math.random() * Math.PI * 2,
+        rS: (Math.random() - 0.5) * 0.2,
+        vY: Math.random() * 4 + 2,
+        vX: (Math.random() - 0.5) * 2,
+        renk: renkler[Math.floor(Math.random() * renkler.length)],
+      }));
+
+      let frame = 0;
+      function ciz() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        parcalar.forEach(p => {
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.r);
+          ctx.fillStyle = p.renk;
+          ctx.globalAlpha = Math.max(0, 1 - frame / 120);
+          ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+          ctx.restore();
+          p.y += p.vY;
+          p.x += p.vX;
+          p.r += p.rS;
+        });
+        frame++;
+        if (frame < 140) requestAnimationFrame(ciz);
+        else { ctx.clearRect(0, 0, canvas.width, canvas.height); canvas.style.display = 'none'; }
+      }
+      ciz();
+    }
+
+    yukle();
+  </script>
+
+</body>
+</html>
